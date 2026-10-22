@@ -1,0 +1,37 @@
+name: Alfred Cloud H24
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '*/15 * * * *'
+
+concurrency:
+  group: alfred-cloud-bot-singleton
+  cancel-in-progress: false
+
+jobs:
+  cloud-bot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 55
+    steps:
+      - name: Checkout Cloud Engine
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: pip install requests
+
+      - name: Run Alfred Cloud Bot
+        env:
+          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+          ALLOWED_CHAT_ID: ${{ secrets.ALLOWED_CHAT_ID }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GH_PAT: ${{ secrets.GH_PAT }}
+          ALFRED_GH_USER: ${{ secrets.ALFRED_GH_USER }}
+          ALFRED_VAULT_REPO: ${{ secrets.ALFRED_VAULT_REPO }}
+          ALFRED_ENGINE_REPO: ${{ secrets.ALFRED_ENGINE_REPO }}
+        run: python cloud_bot.py
