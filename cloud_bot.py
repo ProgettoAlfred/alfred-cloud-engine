@@ -157,13 +157,33 @@ def call_gemini(prompt_text: str, active_project: str, image_bytes: bytes | None
     }
 
 
+def is_pc_truly_online(pc_status: dict) -> bool:
+    if not pc_status.get("pc_online"):
+        return False
+    hb_raw = pc_status.get("last_heartbeat_utc") or pc_status.get("updated_at") or ""
+    if not hb_raw:
+        return True
+    try:
+        hb_dt = datetime.fromisoformat(hb_raw.replace("Z", "+00:00"))
+        age_sec = (datetime.now(timezone.utc) - hb_dt).total_seconds()
+        # Se il PC non invia un battito da più di 3 minuti (180s), è spento/offline/in sospensione!
+        if age_sec > 180:
+            print(f"Heartbeat PC scaduto ({age_sec:.0f}s fa): subentro automatico del Cloud!")
+            pc_status["pc_online"] = False
+            put_vault_file("status/pc_status.json", json.dumps(pc_status).encode(), "Auto-failover to Cloud (stale heartbeat)")
+            return False
+    except Exception:
+        pass
+    return True
+
+
 def main():
     start_time = time.time()
     max_run_seconds = 45 * 60  # Gira per 45 minuti e poi si riavvia da solo se il PC è ancora spento
 
     pc_status = get_vault_json("status/pc_status.json", {"pc_online": False})
-    if pc_status.get("pc_online"):
-        print("PC rilevato ONLINE! Il bot Cloud non parte per lasciare il posto ad Antigravity Pro.")
+    if is_pc_truly_online(pc_status):
+        print("PC rilevato ONLINE (battito attivo)! Il bot Cloud non parte per lasciare il posto ad Antigravity Pro.")
         return
 
     cloud_state = get_vault_json(
@@ -193,7 +213,7 @@ def main():
     while time.time() - start_time < max_run_seconds:
         # 1. Controlla se il PC è acceso: se sì, cede subito il controllo ad Antigravity Pro sul PC!
         pc_status = get_vault_json("status/pc_status.json", {"pc_online": False})
-        if pc_status.get("pc_online"):
+        if is_pc_truly_online(pc_status):
             print("PC rilevato ONLINE! Il bot Cloud si mette in pausa per lasciare il posto ad Antigravity Pro.")
             return
 
