@@ -2,6 +2,15 @@ name: Alfred Cloud H24
 
 on:
   workflow_dispatch:
+    inputs:
+      force:
+        description: 'shutdown/sleep = il PC si sta spegnendo: subentra subito'
+        required: false
+        default: ''
+      ts:
+        description: 'Istante (epoch) dello spegnimento del PC'
+        required: false
+        default: '0'
   schedule:
     - cron: '*/15 * * * *'
 
@@ -35,4 +44,6 @@ jobs:
           ALFRED_VAULT_REPO: ${{ secrets.ALFRED_VAULT_REPO }}
           ALFRED_ENGINE_REPO: ${{ secrets.ALFRED_ENGINE_REPO }}
           GOOGLE_HUB_URL: ${{ secrets.GOOGLE_HUB_URL }}
+          FORCE_TAKEOVER: ${{ github.event.inputs.force }}
+          FORCE_TS: ${{ github.event.inputs.ts }}
         run: python cloud_bot.py
