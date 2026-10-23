@@ -26,6 +26,8 @@ GH_USER = os.environ.get("ALFRED_GH_USER", "ProgettoAlfred").strip()
 VAULT_REPO = os.environ.get("ALFRED_VAULT_REPO", "progetti-ai-vault").strip()
 ENGINE_REPO = os.environ.get("ALFRED_ENGINE_REPO", "alfred-cloud-engine").strip()
 GOOGLE_HUB_URL = os.environ.get("GOOGLE_HUB_URL", "").strip()
+KEEP_MASTER_TOKEN = os.environ.get("KEEP_MASTER_TOKEN", "").strip()
+GOOGLE_EMAIL = os.environ.get("GOOGLE_EMAIL", "vascorossi24@gmail.com").strip()
 ALFRED_SECRET = "Alfred_Pasquale_2026_Secret"
 
 WORK_DIR = Path("workspace")
@@ -474,19 +476,36 @@ def main():
                     subprocess.run(result["shell_cmd"], shell=True, cwd=str(proj_local), timeout=180)
 
                 google_results = []
-                if GOOGLE_HUB_URL and result.get("google_actions"):
+                if result.get("google_actions"):
                     for gact in result.get("google_actions") or []:
                         if isinstance(gact, dict) and gact.get("action"):
-                            gpayload = dict(gact)
-                            gpayload["secret"] = ALFRED_SECRET
-                            try:
-                                gr = requests.post(GOOGLE_HUB_URL, json=gpayload, timeout=40, allow_redirects=True).json()
-                                if gr.get("ok"):
-                                    google_results.append(f"✅ Google ({gact['action']}): completato!")
-                                else:
-                                    google_results.append(f"⚠️ Google ({gact['action']}): {gr.get('error')}")
-                            except Exception as ge:
-                                google_results.append(f"⚠️ Errore Google ({gact['action']}): {ge}")
+                            # 1. Se l'azione è note_add e abbiamo KEEP_MASTER_TOKEN, salva nativamente su Google Keep!
+                            if gact.get("action") == "note_add" and KEEP_MASTER_TOKEN:
+                                try:
+                                    import gkeepapi
+                                    k_client = gkeepapi.Keep()
+                                    k_client.authenticate(GOOGLE_EMAIL, KEEP_MASTER_TOKEN)
+                                    n_title = gact.get("title", "Nota")
+                                    n_content = gact.get("content", "")
+                                    k_client.createNote(n_title, n_content)
+                                    k_client.sync()
+                                    google_results.append(f"📝 Google Keep (Nativo): Nota '{n_title}' salvata con successo!")
+                                    continue
+                                except Exception as ke:
+                                    print(f"Keep fallito nel Cloud, fallback su Hub: {ke}")
+
+                            # 2. Tutte le altre azioni (Calendar, Tasks, Docs, Gmail) passano per Google Hub
+                            if GOOGLE_HUB_URL:
+                                gpayload = dict(gact)
+                                gpayload["secret"] = ALFRED_SECRET
+                                try:
+                                    gr = requests.post(GOOGLE_HUB_URL, json=gpayload, timeout=40, allow_redirects=True).json()
+                                    if gr.get("ok"):
+                                        google_results.append(f"✅ Google ({gact['action']}): completato!")
+                                    else:
+                                        google_results.append(f"⚠️ Google ({gact['action']}): {gr.get('error')}")
+                                except Exception as ge:
+                                    google_results.append(f"⚠️ Errore Google ({gact['action']}): {ge}")
 
                 reply_msg = f"☁️ [Alfred Cloud - {active_proj}]:\n{result.get('reply', 'Fatto!')}"
                 if google_results:
