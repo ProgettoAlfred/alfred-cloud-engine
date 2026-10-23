@@ -140,11 +140,34 @@ def main():
     start_time = time.time()
     max_run_seconds = 45 * 60  # Gira per 45 minuti e poi si riavvia da solo se il PC è ancora spento
 
+    pc_status = get_vault_json("status/pc_status.json", {"pc_online": False})
+    if pc_status.get("pc_online"):
+        print("PC rilevato ONLINE! Il bot Cloud non parte per lasciare il posto ad Antigravity Pro.")
+        return
+
     cloud_state = get_vault_json(
         "status/cloud_state.json",
         {"last_update_id": 0, "active_project": "telegram-bridge", "pending_file": ""},
     )
-    offset = cloud_state.get("last_update_id", 0) + 1
+    if pc_status.get("active_project_name"):
+        cloud_state["active_project"] = pc_status["active_project_name"]
+
+    last_known_id = max(
+        int(cloud_state.get("last_update_id", 0)),
+        int(pc_status.get("last_update_id", 0)),
+    )
+    offset = last_known_id + 1 if last_known_id > 0 else 0
+
+    if pc_status.get("notify_start"):
+        pc_status["notify_start"] = False
+        put_vault_file("status/pc_status.json", json.dumps(pc_status).encode(), "Ack cloud start")
+        send_text(
+            f"☁️ [Alfred Cloud H24 — Online!]\n"
+            f"Sono in ascolto dai server GitHub (progetto attivo: '{cloud_state.get('active_project', 'telegram-bridge')}').\n"
+            f"• Scrivimi pure una domanda o mandami un'immagine!\n"
+            f"• Usa /nuovo <nome> per creare un progetto nel Cloud.\n"
+            f"• Tocca /pc quando vuoi restituire il controllo ad Antigravity Pro sul tuo PC."
+        )
 
     while time.time() - start_time < max_run_seconds:
         # 1. Controlla se il PC è acceso: se sì, cede subito il controllo ad Antigravity Pro sul PC!
@@ -192,10 +215,30 @@ def main():
                 text = (msg.get("text") or msg.get("caption") or "").strip()
                 active_proj = cloud_state.get("active_project", "telegram-bridge")
 
+                # Ritorno immediato in modalità PC
+                if text.lower().startswith("/pc"):
+                    put_vault_file("status/cloud_state.json", json.dumps(cloud_state).encode(), "Update cloud state")
+                    put_vault_file(
+                        "status/pc_status.json",
+                        json.dumps(
+                            {
+                                "pc_online": True,
+                                "updated_at": datetime.now(timezone.utc).isoformat(),
+                                "active_project_name": active_proj,
+                                "last_update_id": upd["update_id"],
+                            }
+                        ).encode(),
+                        "Handover back to PC",
+                    )
+                    send_text(
+                        "💻 Passo subito il controllo ad Antigravity Pro sul tuo PC e sincronizzo eventuali file creati nel Cloud..."
+                    )
+                    return
+
                 # Comandi rapidi Cloud
                 if text.lower().startswith("/progetto"):
                     send_text(
-                        f"☁️ [Modalità Cloud - PC Spento]\n"
+                        f"☁️ [Modalità Cloud H24]\n"
                         f"📂 Progetto attivo: {active_proj}\n"
                         f"📍 Verrà sincronizzato sul PC in: C:\\Users\\pasqu\\Desktop\\Progetti AI\\{active_proj}"
                     )
@@ -209,6 +252,34 @@ def main():
                         m = "✅" if p == active_proj else "▫️"
                         lines.append(f"{m} {p}")
                     send_text("\n".join(lines))
+                    put_vault_file("status/cloud_state.json", json.dumps(cloud_state).encode(), "Update state")
+                    continue
+
+                if text.lower().startswith("/sync"):
+                    send_text(
+                        f"☁️ [Modalità Cloud] Tutti i file del progetto '{active_proj}' sono già salvati nel tuo Vault su GitHub e verranno scaricati in Desktop\\Progetti AI appena torni al PC (o tocchi /pc)!"
+                    )
+                    put_vault_file("status/cloud_state.json", json.dumps(cloud_state).encode(), "Update state")
+                    continue
+
+                if text.lower().startswith(("/limiti", "/modello")):
+                    send_text(
+                        "☁️ [Modalità Cloud H24]\n"
+                        "In questo momento ti sto rispondendo dal Cloud tramite Gemini 2.5 Flash API (quindi NON stai consumando i limiti di Antigravity Pro!).\n"
+                        "Per interrogare i limiti live o cambiare il modello di Antigravity sul PC, tocca prima /pc."
+                    )
+                    put_vault_file("status/cloud_state.json", json.dumps(cloud_state).encode(), "Update state")
+                    continue
+
+                if text.lower().startswith("/help"):
+                    send_text(
+                        "☁️ [Guida Modalità Cloud H24]:\n"
+                        "• Scrivimi qualsiasi domanda o codice da creare\n"
+                        "• /nuovo <nome> — Crea un nuovo progetto nel Cloud\n"
+                        "• /progetti — Vedi i progetti nel Vault\n"
+                        "• /usa <nome> — Cambia progetto attivo\n"
+                        "• /pc — Restituisci subito il controllo ad Antigravity Pro sul PC"
+                    )
                     put_vault_file("status/cloud_state.json", json.dumps(cloud_state).encode(), "Update state")
                     continue
 
