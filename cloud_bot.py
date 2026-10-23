@@ -25,6 +25,8 @@ GH_PAT = os.environ["GH_PAT"].strip()
 GH_USER = os.environ.get("ALFRED_GH_USER", "ProgettoAlfred").strip()
 VAULT_REPO = os.environ.get("ALFRED_VAULT_REPO", "progetti-ai-vault").strip()
 ENGINE_REPO = os.environ.get("ALFRED_ENGINE_REPO", "alfred-cloud-engine").strip()
+GOOGLE_HUB_URL = os.environ.get("GOOGLE_HUB_URL", "").strip()
+ALFRED_SECRET = "Alfred_Pasquale_2026_Secret"
 
 WORK_DIR = Path("workspace")
 WORK_DIR.mkdir(exist_ok=True)
@@ -96,16 +98,24 @@ def call_gemini(prompt_text: str, active_project: str, image_bytes: bytes | None
     - shell_cmd: eventuale comando per compilare/creare un file (es. zip/apk/exe)
     - generated_file: percorso di un file generato (per cui chiedere SEMPRE conferma prima dell'invio!)
     """
+    now_str = datetime.now().strftime("%Y-%m-%d %H:%M")
     system_prompt = (
-        f"Sei Alfred (versione Cloud H24 di Antigravity) per Pasquale. "
+        f"Sei Alfred (versione Cloud H24 di Antigravity) per Pasquale (data/ora attuale: {now_str}). "
         f"Il suo PC di casa al momento è spento, quindi stai lavorando nel Cloud sul progetto attivo '{active_project}'. "
         f"Tutti i file che crei in 'files_to_save' verranno salvati nel Cloud e sincronizzati automaticamente "
         f"sul suo PC in 'C:\\Users\\pasqu\\Desktop\\Progetti AI\\{active_project}' appena accenderà il PC.\n"
+        f"Hai anche accesso diretto a tutti i servizi Google di Pasquale (Google Calendar, Google Tasks/Keep, Google Drive, Google Docs, Gmail) "
+        f"tramite il campo opzionale 'google_actions' (lista di azioni da eseguire sul suo account Google).\n"
+        f"Azioni supportate in 'google_actions':\n"
+        f"- {{\"action\": \"calendar_add\", \"title\": \"...\", \"start_iso\": \"2026-11-30T09:00:00+01:00\", \"end_iso\": \"2026-11-30T10:00:00+01:00\", \"description\": \"...\", \"location\": \"...\"}}\n"
+        f"- {{\"action\": \"note_add\", \"title\": \"...\", \"content\": \"...\", \"due_iso\": \"2026-11-30T09:00:00Z\"}}\n"
+        f"- {{\"action\": \"doc_create\", \"title\": \"...\", \"content\": \"...\"}}\n"
+        f"- {{\"action\": \"gmail_send\", \"to\": \"...\", \"subject\": \"...\", \"body\": \"...\"}}\n"
         f"REGOLA FONDAMENTALE SUI FILE: Non inviare mai file in automatico. Se generi un file compilato o un pacchetto, "
         f"indicalo in 'generated_file' e nel testo 'reply' chiedi a Pasquale se vuole riceverlo su Telegram.\n"
         f"Rispondi ESCLUSIVAMENTE con un oggetto JSON valido con questa struttura:\n"
         f'{{"reply": "tua risposta in italiano...", "files_to_save": [{{"path": "nomefile.ext", "content": "codice..."}}], '
-        f'"shell_cmd": "", "generated_file": ""}}'
+        f'"google_actions": [], "shell_cmd": "", "generated_file": ""}}'
     )
 
     parts = [{"text": f"{system_prompt}\n\nRichiesta di Pasquale:\n{prompt_text}"}]
@@ -360,7 +370,24 @@ def main():
                 if result.get("shell_cmd"):
                     subprocess.run(result["shell_cmd"], shell=True, cwd=str(proj_local), timeout=180)
 
+                google_results = []
+                if GOOGLE_HUB_URL and result.get("google_actions"):
+                    for gact in result.get("google_actions") or []:
+                        if isinstance(gact, dict) and gact.get("action"):
+                            gpayload = dict(gact)
+                            gpayload["secret"] = ALFRED_SECRET
+                            try:
+                                gr = requests.post(GOOGLE_HUB_URL, json=gpayload, timeout=40, allow_redirects=True).json()
+                                if gr.get("ok"):
+                                    google_results.append(f"✅ Google ({gact['action']}): completato!")
+                                else:
+                                    google_results.append(f"⚠️ Google ({gact['action']}): {gr.get('error')}")
+                            except Exception as ge:
+                                google_results.append(f"⚠️ Errore Google ({gact['action']}): {ge}")
+
                 reply_msg = f"☁️ [Alfred Cloud - {active_proj}]:\n{result.get('reply', 'Fatto!')}"
+                if google_results:
+                    reply_msg += "\n\n🔗 Azioni Google eseguite:\n• " + "\n• ".join(google_results)
                 if saved_files:
                     reply_msg += (
                         f"\n\n💾 File salvati e pronti per la sincronizzazione sul PC "
