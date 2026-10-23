@@ -34,4 +34,5 @@ jobs:
           ALFRED_GH_USER: ${{ secrets.ALFRED_GH_USER }}
           ALFRED_VAULT_REPO: ${{ secrets.ALFRED_VAULT_REPO }}
           ALFRED_ENGINE_REPO: ${{ secrets.ALFRED_ENGINE_REPO }}
+          GOOGLE_HUB_URL: ${{ secrets.GOOGLE_HUB_URL }}
         run: python cloud_bot.py
