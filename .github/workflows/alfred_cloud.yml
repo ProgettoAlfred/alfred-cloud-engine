@@ -32,7 +32,7 @@ jobs:
           python-version: '3.12'
 
       - name: Install dependencies
-        run: pip install requests
+        run: pip install requests gkeepapi gpsoauth
 
       - name: Run Alfred Cloud Bot
         env:
@@ -44,6 +44,8 @@ jobs:
           ALFRED_VAULT_REPO: ${{ secrets.ALFRED_VAULT_REPO }}
           ALFRED_ENGINE_REPO: ${{ secrets.ALFRED_ENGINE_REPO }}
           GOOGLE_HUB_URL: ${{ secrets.GOOGLE_HUB_URL }}
+          KEEP_MASTER_TOKEN: ${{ secrets.KEEP_MASTER_TOKEN }}
+          GOOGLE_EMAIL: ${{ secrets.GOOGLE_EMAIL }}
           FORCE_TAKEOVER: ${{ github.event.inputs.force }}
           FORCE_TS: ${{ github.event.inputs.ts }}
         run: python cloud_bot.py
