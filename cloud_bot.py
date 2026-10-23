@@ -173,7 +173,21 @@ def call_gemini(
     }
 
 
+FORCE_TAKEOVER = os.environ.get("FORCE_TAKEOVER", "").strip()  # "shutdown" / "sleep" se avviato dallo spegnimento del PC
+try:
+    FORCE_TS = float(os.environ.get("FORCE_TS", "0").strip() or 0)
+except Exception:
+    FORCE_TS = 0.0
+_stale_takeover = False
+
+
 def is_pc_truly_online(pc_status: dict) -> bool:
+    """
+    Il PC è considerato acceso SOLO se ha inviato un battito cardiaco recente (< 75s).
+    Se il Cloud è stato avviato dallo spegnimento del PC (FORCE_TAKEOVER), il PC è considerato
+    acceso solo se ha inviato un battito DOPO l'istante dello spegnimento (es. riacceso).
+    """
+    global _stale_takeover
     if not pc_status.get("pc_online"):
         return False
     hb_raw = pc_status.get("last_heartbeat_utc") or pc_status.get("updated_at") or ""
@@ -181,12 +195,15 @@ def is_pc_truly_online(pc_status: dict) -> bool:
         return False
     try:
         hb_dt = datetime.fromisoformat(hb_raw.replace("Z", "+00:00"))
+        if FORCE_TAKEOVER and FORCE_TS and hb_dt.timestamp() <= FORCE_TS + 5:
+            return False
         age_sec = (datetime.now(timezone.utc) - hb_dt).total_seconds()
         # Se il PC non invia un battito da più di 75 secondi, è spento/offline/in sospensione!
         if age_sec > 75:
             print(f"Heartbeat PC scaduto ({age_sec:.0f}s fa): subentro automatico del Cloud!")
             pc_status["pc_online"] = False
             put_vault_file("status/pc_status.json", json.dumps(pc_status).encode(), "Auto-failover to Cloud (stale heartbeat)")
+            _stale_takeover = True
             return False
     except Exception:
         pass
@@ -215,14 +232,28 @@ def main():
     )
     offset = last_known_id + 1 if last_known_id > 0 else 0
 
-    if pc_status.get("notify_start"):
+    should_notify = bool(pc_status.get("notify_start") or _stale_takeover or pc_status.get("pc_online"))
+    if FORCE_TAKEOVER:
+        last_force = float(cloud_state.get("last_force_ts", 0) or 0)
+        # Più avvii ravvicinati per lo stesso spegnimento (guardiano + operazione pianificata) = 1 solo messaggio
+        if FORCE_TS > last_force + 120:
+            should_notify = True
+        cloud_state["last_force_ts"] = max(FORCE_TS, last_force)
+        put_vault_file("status/cloud_state.json", json.dumps(cloud_state).encode(), "Update cloud state")
+
+    if should_notify:
+        motivo = {
+            "shutdown": "Il PC si è appena spento",
+            "sleep": "Il PC è andato in sospensione",
+        }.get(FORCE_TAKEOVER, "Il PC risulta offline o spento")
         pc_status["notify_start"] = False
+        pc_status["pc_online"] = False
         put_vault_file("status/pc_status.json", json.dumps(pc_status).encode(), "Ack cloud start")
         send_text(
             f"☁️ [Alfred Cloud H24 — Switch da PC a Cloud completato]\n\n"
-            f"Il PC è offline o spento: ho effettuato lo switch da PC a Cloud H24.\n"
+            f"{motivo}: ho effettuato lo switch da PC a Cloud H24.\n"
             f"Sono in ascolto dai server GitHub (progetto attivo: '{cloud_state.get('active_project', 'telegram-bridge')}').\n"
-            f"• Scrivimi pure una domanda, un codice o mandami un'immagine!\n"
+            f"• Scrivimi pure una domanda, un codice, un vocale o mandami un'immagine!\n"
             f"• Usa /nuovo <nome> per creare un progetto nel Cloud.\n"
             f"• Non appena accendi il PC, il controllo tornerà automaticamente ad Antigravity Pro con relativo messaggio di switch."
         )
