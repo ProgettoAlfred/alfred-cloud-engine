@@ -178,12 +178,12 @@ def is_pc_truly_online(pc_status: dict) -> bool:
         return False
     hb_raw = pc_status.get("last_heartbeat_utc") or pc_status.get("updated_at") or ""
     if not hb_raw:
-        return True
+        return False
     try:
         hb_dt = datetime.fromisoformat(hb_raw.replace("Z", "+00:00"))
         age_sec = (datetime.now(timezone.utc) - hb_dt).total_seconds()
-        # Se il PC non invia un battito da più di 3 minuti (180s), è spento/offline/in sospensione!
-        if age_sec > 180:
+        # Se il PC non invia un battito da più di 75 secondi, è spento/offline/in sospensione!
+        if age_sec > 75:
             print(f"Heartbeat PC scaduto ({age_sec:.0f}s fa): subentro automatico del Cloud!")
             pc_status["pc_online"] = False
             put_vault_file("status/pc_status.json", json.dumps(pc_status).encode(), "Auto-failover to Cloud (stale heartbeat)")
@@ -274,25 +274,30 @@ def main():
                 text = (msg.get("text") or msg.get("caption") or "").strip()
                 active_proj = cloud_state.get("active_project", "telegram-bridge")
 
-                # Ritorno immediato in modalità PC
-                if text.lower().startswith("/pc"):
+                # Se il messaggio è un comando vecchio inviato prima dell'avvio di questo Cloud bot, ignoralo
+                msg_date = msg.get("date", 0)
+                if msg_date and (msg_date < start_time - 120) and text.startswith("/"):
+                    print(f"Ignorato vecchio comando Telegram obsoleto ({text}) inviato alle {msg_date}")
                     put_vault_file("status/cloud_state.json", json.dumps(cloud_state).encode(), "Update cloud state")
-                    put_vault_file(
-                        "status/pc_status.json",
-                        json.dumps(
-                            {
-                                "pc_online": True,
-                                "updated_at": datetime.now(timezone.utc).isoformat(),
-                                "active_project_name": active_proj,
-                                "last_update_id": upd["update_id"],
-                            }
-                        ).encode(),
-                        "Handover back to PC",
-                    )
-                    send_text(
-                        "💻 Passo subito il controllo ad Antigravity Pro sul tuo PC e sincronizzo eventuali file creati nel Cloud..."
-                    )
-                    return
+                    continue
+
+                # Ritorno in modalità PC
+                if text.lower().startswith("/pc"):
+                    fresh_pc = get_vault_json("status/pc_status.json", {"pc_online": False})
+                    if is_pc_truly_online(fresh_pc):
+                        put_vault_file("status/cloud_state.json", json.dumps(cloud_state).encode(), "Update cloud state")
+                        send_text(
+                            "💻 Antigravity Pro sul tuo PC è attivo e connesso: passo subito il controllo al PC!"
+                        )
+                        return
+                    else:
+                        send_text(
+                            "⚠️ [Cloud H24] Il tuo PC risulta attualmente SPENTO o OFFLINE.\n\n"
+                            "Resto attivo io nel Cloud per eseguire le tue richieste!\n"
+                            "Non appena accenderai il PC (anche da remoto), Antigravity Pro subentrerà automaticamente."
+                        )
+                        put_vault_file("status/cloud_state.json", json.dumps(cloud_state).encode(), "Update cloud state")
+                        continue
 
                 # Comandi rapidi Cloud
                 if text.lower().startswith("/progetto"):
