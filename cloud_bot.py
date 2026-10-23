@@ -2,9 +2,9 @@
 """
 Alfred Cloud Bot H24 (Eseguito su GitHub Actions quando il PC è spento)
 -----------------------------------------------------------------------
-- Risponde su @Alfred_agy_bot usando Gemini 2.5 Flash (multimodale: testo + immagini).
+- Risponde su @Alfred_agy_bot usando Gemini 3.8 Flash (multimodale: testo + immagini).
 - Crea e modifica progetti direttamente nel repository privato 'progetti-ai-vault',
-  così appena accendi il PC vengono scaricati in automatico in Desktop\Progetti AI!
+  così appena accendi il PC vengono scaricati in automatico in Desktop\\Progetti AI!
 - Chiede SEMPRE il permesso con pulsanti interattivi prima di inviare qualsiasi file su Telegram.
 - Si ferma automaticamente appena rileva che il PC è acceso (pc_online = True).
 """
@@ -119,21 +119,32 @@ def call_gemini(prompt_text: str, active_project: str, image_bytes: bytes | None
             }
         )
 
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={GEMINI_API_KEY}"
-    resp = requests.post(
-        url,
-        json={
-            "contents": [{"parts": parts}],
-            "generationConfig": {"responseMimeType": "application/json"},
-        },
-        timeout=90,
-    )
-    resp.raise_for_status()
-    cand = resp.json()["candidates"][0]["content"]["parts"][0]["text"]
-    try:
-        return json.loads(cand)
-    except Exception:
-        return {"reply": cand, "files_to_save": [], "shell_cmd": "", "generated_file": ""}
+    models_to_try = ["gemini-3.8-flash", "gemini-flash-latest", "gemini-3-flash-preview"]
+    last_err = ""
+    for m_name in models_to_try:
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{m_name}:generateContent?key={GEMINI_API_KEY}"
+        resp = requests.post(
+            url,
+            json={
+                "contents": [{"parts": parts}],
+                "generationConfig": {"responseMimeType": "application/json"},
+            },
+            timeout=90,
+        )
+        if resp.status_code == 200:
+            cand = resp.json()["candidates"][0]["content"]["parts"][0]["text"]
+            try:
+                return json.loads(cand)
+            except Exception:
+                return {"reply": cand, "files_to_save": [], "shell_cmd": "", "generated_file": ""}
+        last_err = f"{resp.status_code}: {resp.text[:300]}"
+
+    return {
+        "reply": f"⚠️ Errore chiamata Gemini API: {last_err}",
+        "files_to_save": [],
+        "shell_cmd": "",
+        "generated_file": "",
+    }
 
 
 def main():
