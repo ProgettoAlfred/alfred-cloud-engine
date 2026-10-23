@@ -90,9 +90,15 @@ def list_vault_projects() -> list[str]:
     return sorted([item["name"] for item in r.json() if item.get("type") == "dir"])
 
 
-def call_gemini(prompt_text: str, active_project: str, image_bytes: bytes | None = None) -> dict:
+def call_gemini(
+    prompt_text: str,
+    active_project: str,
+    image_bytes: bytes | None = None,
+    audio_bytes: bytes | None = None,
+    audio_mime: str = "audio/ogg",
+) -> dict:
     """
-    Chiama Gemini 2.5 Flash chiedendo una risposta JSON strutturata che può includere:
+    Chiama Gemini Flash chiedendo una risposta JSON strutturata che può includere:
     - reply: risposta testuale per l'utente su Telegram
     - files_to_save: lista di {"path": "percorso/relativo", "content": "..."} da salvare nel progetto attivo
     - shell_cmd: eventuale comando per compilare/creare un file (es. zip/apk/exe)
@@ -128,8 +134,18 @@ def call_gemini(prompt_text: str, active_project: str, image_bytes: bytes | None
                 }
             }
         )
+    if audio_bytes:
+        parts.append(
+            {
+                "inline_data": {
+                    "mime_type": audio_mime,
+                    "data": base64.b64encode(audio_bytes).decode("ascii"),
+                }
+            }
+        )
 
-    models_to_try = ["gemini-3.8-flash", "gemini-flash-latest", "gemini-3-flash-preview"]
+    models_to_try = ["gemini-3.5-flash", "gemini-3.8-flash", "gemini-flash-latest", "gemini-3-flash-preview"]
+
     last_err = ""
     for m_name in models_to_try:
         url = f"https://generativelanguage.googleapis.com/v1beta/models/{m_name}:generateContent?key={GEMINI_API_KEY}"
@@ -203,12 +219,14 @@ def main():
         pc_status["notify_start"] = False
         put_vault_file("status/pc_status.json", json.dumps(pc_status).encode(), "Ack cloud start")
         send_text(
-            f"☁️ [Alfred Cloud H24 — Online!]\n"
+            f"☁️ [Alfred Cloud H24 — Switch da PC a Cloud completato]\n\n"
+            f"Il PC è offline o spento: ho effettuato lo switch da PC a Cloud H24.\n"
             f"Sono in ascolto dai server GitHub (progetto attivo: '{cloud_state.get('active_project', 'telegram-bridge')}').\n"
-            f"• Scrivimi pure una domanda o mandami un'immagine!\n"
+            f"• Scrivimi pure una domanda, un codice o mandami un'immagine!\n"
             f"• Usa /nuovo <nome> per creare un progetto nel Cloud.\n"
-            f"• Tocca /pc quando vuoi restituire il controllo ad Antigravity Pro sul tuo PC."
+            f"• Non appena accendi il PC, il controllo tornerà automaticamente ad Antigravity Pro con relativo messaggio di switch."
         )
+
 
     while time.time() - start_time < max_run_seconds:
         # 1. Controlla se il PC è acceso: se sì, cede subito il controllo ad Antigravity Pro sul PC!
@@ -367,8 +385,36 @@ def main():
                             f"Save photo from Telegram to {active_proj}",
                         )
 
-                send_text(f"☁️ [{active_proj} - Cloud H24] Elaboro la tua richiesta con Gemini...")
-                result = call_gemini(text or "Analizza l'immagine allegata", active_proj, img_bytes)
+                # Scarica eventuale messaggio vocale o file audio inviato
+                audio_bytes = None
+                if "voice" in msg:
+                    fid = msg["voice"]["file_id"]
+                    finfo = requests.get(api_url("getFile"), params={"file_id": fid}, timeout=15).json()
+                    if finfo.get("ok"):
+                        rpath = finfo["result"]["file_path"]
+                        audio_bytes = requests.get(f"https://api.telegram.org/file/bot{BOT_TOKEN}/{rpath}", timeout=30).content
+                        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+                        put_vault_file(
+                            f"projects/{active_proj}/inbox_cloud/{ts}_voice.ogg",
+                            audio_bytes,
+                            f"Save voice note from Telegram to {active_proj}",
+                        )
+
+                if "audio" in msg:
+                    fid = msg["audio"]["file_id"]
+                    finfo = requests.get(api_url("getFile"), params={"file_id": fid}, timeout=15).json()
+                    if finfo.get("ok"):
+                        rpath = finfo["result"]["file_path"]
+                        audio_bytes = requests.get(f"https://api.telegram.org/file/bot{BOT_TOKEN}/{rpath}", timeout=30).content
+
+                if audio_bytes:
+                    send_text(f"🎙️ [{active_proj} - Cloud H24] Ho ricevuto il tuo messaggio vocale! Lo ascolto ed elaboro con Gemini...")
+                    prompt_to_use = text or "Ascolta con la massima attenzione la richiesta vocale contenuta nell'audio allegato ed eseguila integralmente."
+                    result = call_gemini(prompt_to_use, active_proj, image_bytes=img_bytes, audio_bytes=audio_bytes, audio_mime="audio/ogg")
+                else:
+                    send_text(f"☁️ [{active_proj} - Cloud H24] Elaboro la tua richiesta con Gemini...")
+                    result = call_gemini(text or "Analizza l'immagine allegata", active_proj, image_bytes=img_bytes)
+
 
                 proj_local = WORK_DIR / active_proj
                 proj_local.mkdir(parents=True, exist_ok=True)
